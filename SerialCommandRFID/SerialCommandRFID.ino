@@ -3,6 +3,10 @@
 // Evan Allen
 // June 2013
 
+#define PRIV_ACCESS 0   //allowed to enter space
+#define PRIV_ADDUSER 1  //allowed to add or remove users
+#define PRIV_DOORBELL 2 //allowed to set doorbell mode
+#define PRIV_DOORHOLD 3 //allowed to set door hold mode
 
 #include <MD5.h>
 #include <Arduino.h>
@@ -15,20 +19,20 @@ SerialCommand SCmd;   // The demo SerialCommand object
 
 
 #include <OneWire.h>
-/* Interface to DS1822 chip, record data to eeprom */
+/* Interface to DS1822 chip, record data to EEPROM */
 OneWire ds(30);  /* define the pin the interface is on */
 
 
 //I2C stuff
 #include <Wire.h>         // Needed for I2C Connection to the DS1307 date/time chip
 #include <DS1307.h>       // DS1307 RTC Clock/Date/Time chip library
-#include <E24C1024.h>     // Needed for the onboard EEprom
+#include <E24C1024.h>     // Needed for the onboard EEPROM
 uint8_t second, minute, hour, dayOfWeek, dayOfMonth, month, year;     // Global RTC clock variables. Can be set using DS1307.getDate function.
 DS1307 ds1307;        // RTC Instance
 
 
 //RFID reader stuff
-#include <WIEGAND26.h>    // Wiegand 26 reader format libary
+#include <WIEGAND26.h>    // Wiegand 26 reader format library
 byte reader1Pins[]={19,18};          // Reader 1 connected to pins 19,18
 byte reader2Pins[]={2,3};          // Reader2 connected to pins 2,3
 long reader1 = 0;
@@ -44,7 +48,7 @@ const byte reader1led2 = 17; //pin for led2 on Reader1
 WIEGAND26 wiegand26;
 
 
-//Get the interrupt number of a given digital pin on an arduino mega.
+//Get the interrupt number of a given digital pin on an Arduino MEGA.
 const byte pinToInterrupt[22] = {-1,-1,0,1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,5,4,3,2};
 
 
@@ -54,10 +58,10 @@ const int analogToPins[16] = {54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69};
 
 
 //exit button stuff
-const int exit_button = 48; //digital pinthe exit button is attached to
+const int exit_button = 48; //digital pin the exit button is attached to
 const int exit_relay = 0; //relay the door solenoid is on
 const unsigned long exit_time = 3000; //time to keep the door open in thousandths of a second
-boolean exiting = 0; //wether or not the door should be open (and timer running)
+boolean exiting = 0; //whether or not the door should be open (and timer running)
 unsigned long exit_start_time = 0; //used for count down timer
 
 
@@ -89,7 +93,7 @@ unsigned long doorbell_dur = (3600000*12); //timeout for doorbell in hours
 
 
 //toggle stuff
-//unsigned long max_toggle = 15000; //maximum amount of time a toggle can sieze up the processor with a delay loop
+//unsigned long max_toggle = 15000; //maximum amount of time a toggle can seize up the processor with a delay loop
 unsigned long toggle_dur[8] = {0,0,0,0,0,0,0,0}; //time in thousandths of a second
 unsigned long toggle_start[8] = {0,0,0,0,0,0,0,0}; //start time
 boolean toggled[8] = {0,0,0,0,0,0,0,0}; //active or not
@@ -103,7 +107,7 @@ unsigned long doorhold_dur = (60000*10); //timeout for door hold in minutes
 
 
 //battery stuff
-long voltage_threshold = 12.5; //threshold to throw an error at
+float voltage_threshold = 12.5; //threshold to throw an error at
 unsigned long battery_start = 0; //used for count down timer
 unsigned long battery_dur = (3600000); //time between battery checks (1 hour default)
 
@@ -120,7 +124,7 @@ char last = ' ';
 
 long tag = 0; //stores tag
 boolean tag_read = 0; //in pin reading mode
-byte pin[8] = {15,15,15,15,15,15,15,15}; //untypable character, unlike 0
+byte pin[8] = {15,15,15,15,15,15,15,15}; //untypeable character, unlike 0
 byte digit = 0; //index for pin[]
 boolean new_tag_entry = 0; //in new tag entry mode?
 boolean can_add = 0; //if a user is permitted to add other users
@@ -131,7 +135,7 @@ void setup()
 {  
 
 	Wire.begin();   // start Wire library as I2C-Bus Master
-	Serial.begin(9600); 
+	Serial.begin(115200); 
 	RFID_init();
 	IO_init();
 	printer_init();
@@ -150,14 +154,14 @@ void setup()
 	SCmd.addCommand("PRINT",SCmd_print);  // uses printer
 	//format: PRINT;<string>
 	SCmd.addCommand("CONTRAST",SCmd_contrast);  // sets contrast
-	//format: CONTRAST;<analog value, 0-1024>
+	//format: CONTRAST;<analog value, 0-255>
 	SCmd.addCommand("BAT",check_battery);  // reads battery voltage
 	//format: BAT
 	SCmd.addCommand("TEMP",check_temp);  // reads temperature
 	//format: TEMP
 	SCmd.addCommand("BEEP",SCmd_beep);  // beeps reader<reader number> for <duration> in delay(arg) format
 	//format: BEEP;<reader number>,<duration>
-	SCmd.addCommand("READ_CMD",SCmd_read_CMD);  // dumps the command area of the eeprom
+	SCmd.addCommand("READ_CMD",SCmd_read_CMD);  // dumps the command area of the EEPROM
 	//format: READ_CMD
 	SCmd.addCommand("DUMP_USR",SCmd_dump_users);  // dumps all users up to index
 	//format: DUMP_USR
@@ -185,7 +189,7 @@ void setup()
 	//write_EE(2,"Mike", 7, "22df7bee944f0b02bc0b9ce8b826e862");
 	//write_EE(3,"Whoever", 1, "d2e8102a9b4d8bcd20d38cb1fa2b0ddc");
 	//write_EE(4,"Lego", 3, "3bf21d79f6516b061a8326fda21d6af3");
-	//balnk_EE_cmd();
+	//blank_EE_cmd();
 	//command[0] = 5;
 	//write_EE_cmd();
 	//dump_all_EE();
@@ -205,7 +209,7 @@ void loop()
 
 	if (millis() - battery_start > battery_dur) //battery timer loop
 	{
-		check_battery;
+		check_battery();
 	}
 
 	for(int i=0;i<8;i++) //toggle timer loops
@@ -316,7 +320,7 @@ void loop()
 				exit();
 				beep_reader(2,300);
 			}
-			if(keypad_button == '#' && doorhold == 1)//button press in door hold mode, combinewith above
+			if(keypad_button == '#' && doorhold == 1)//button press in door hold mode, combine with above
 			{
 				exit();
 				beep_reader(2,300);
@@ -484,7 +488,7 @@ char keypad_matrix()
 	}
 	else
 	{
-		return ' ';//equivalent to -1, a null reault
+		return ' ';//equivalent to -1, a null result
 	}
 	//delay(10);
 }
@@ -564,8 +568,8 @@ char *ftoa(char *a, double f, int precision)
   itoa(heiltal, a, 10);
   while (*a != '\0') a++;
   *a++ = '.';
-  long desimal = abs((long)((f - heiltal) * p[precision]));
-  itoa(desimal, a, 10);
+  long decimal = abs((long)((f - heiltal) * p[precision]));
+  itoa(decimal, a, 10);
   return ret;
 }
 
@@ -690,7 +694,7 @@ void new_user_entry()
 				name += logDate();
 				priv= 1;
 				write_EE(i, name, priv, md5str);
-				i+=num_users;//break
+				break;
 			}
 		}
 		//Serial.println(md5str);
@@ -1129,7 +1133,7 @@ void read_EE_name(int index)
 }
 
 
-void read_EE_command()//populate working memory from eeprom
+void read_EE_command()//populate working memory from EEPROM
 {
 	//for(int i = 0;i<64;i++)
 	//{
@@ -1142,7 +1146,7 @@ void read_EE_command()//populate working memory from eeprom
 }
 
 
-void write_EE_cmd()//populate eeprom from working memory
+void write_EE_cmd()//populate EEPROM from working memory
 {
 	for(int i = 0;i<64;i++)
 	{
@@ -1151,14 +1155,11 @@ void write_EE_cmd()//populate eeprom from working memory
 }
 
 
-void balnk_EE_cmd()//debug
+void blank_EE_cmd()//debug
 {
 	for(int i = 0;i<64;i++)
 	{
 		command[i] = 0;
-	}
-	for(int i = 0;i<64;i++)
-	{
 		EEPROM1024.write(i,0);
 	}
 }
@@ -1181,7 +1182,7 @@ boolean user_present(int i)
 boolean can_enter(int i)
 {
 	read_EE_priv(i);
-	if(priv == 1||priv == 3||priv == 5||priv == 7||priv == 9||priv == 11||priv == 13||priv == 15)//replace with bitmask
+	if((priv & bit(PRIV_ACCESS)) == bit(PRIV_ACCESS))
 	{
 		return 1;
 	}
@@ -1193,7 +1194,7 @@ boolean can_enter(int i)
 
 
 boolean authenticate(char *md5str)
-{/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////hardcode hashes
+{
 
 	byte hard_hash[5][33] = {{/*"e0bdc8c7b2e2d33e7889858a30aad569"*/},{},{},{},{}};/////////5 hashes
 	boolean succeed = 1;
@@ -1249,7 +1250,7 @@ boolean authenticate(char *md5str)
 					//Serial.println(hash[j],HEX);
 					//Serial.println((md5str[j]),HEX);
 					succeed = 0;
-					j+=32;
+                    break;
 				}
 			}
 			if(succeed == 1)
@@ -1259,35 +1260,20 @@ boolean authenticate(char *md5str)
 				read_EE_hash(i);
 				//Serial.print("win: ");
 				//serial_user_print(i);
-				if(priv == 2||priv == 3||priv == 6||priv == 7||priv == 10||priv == 11||priv == 14||priv == 15)//replace with bitmask
+				if((priv & bit(PRIV_ADDUSER)) == bit(PRIV_ADDUSER))
 				{
 					can_add = 1;
 					//Serial.println("can add");
 				}
-				else
-				{
-					//can_add = 0;//shouldn't need
-					//Serial.println("cannot add");
-				}
-				if(priv == 4||priv == 5||priv == 6||priv == 7||priv == 12||priv == 13||priv == 14||priv == 15)//replace with bitmask
+				if((priv & bit(PRIV_DOORBELL)) == bit(PRIV_DOORBELL))
 				{
 					can_doorbell = 1;
 					//Serial.println("can doorbell");
 				}
-				else
-				{
-					//can_doorbell = 0;//shouldn't need
-					//Serial.println("cannot doorbell");
-				}
-				if(priv == 8||priv == 9||priv == 10||priv == 11||priv == 12||priv == 13||priv == 14||priv == 15)//replace with bitmask
+				if((priv & bit(PRIV_DOORHOLD)) == bit(PRIV_DOORHOLD))
 				{
 					can_doorhold = 1;
 					//Serial.println("can door hold");
-				}
-				else
-				{
-					//can_doorhold = 0;//shouldn't need
-					//Serial.println("cannot door hold");
 				}
 				return 1;
 			}
@@ -1327,30 +1313,10 @@ void beep_repeat(int reader,int time,int number)//blocking
 	//Serial.print(time);
 	//Serial.print(" ");
 	//Serial.println(number);
-	switch(reader){
-		case 0:{
-			for(int i = 0;i<number;i++)
-			{
-				beep_reader(0,time);
-				delay(time);
-			}
-		}
-		case 1:{
-			for(int i = 0;i<number;i++)
-			{
-				beep_reader(1,time);
-				delay(time);
-			}
-		}
-		case 2:{
-			for(int i = 0;i<number;i++)
-			{
-				beep_reader(1,time);
-				delay(time);
-			}
-		}
-		default:{
-		}
+	for(int i = 0;i<number;i++)
+	{
+		beep_reader(reader,time);
+		delay(time);
 	}
 }
 
@@ -1389,11 +1355,11 @@ void beep_reader(int reader,int d)//blocking
 }
 
 
-// dumps the command area of the eeprom
+// dumps the command area of the EEPROM
 //format: READ_CMD
 void SCmd_read_CMD()//debug, dumps command memory
 {
-	read_EE_command();//updates working memory from eeprom
+	read_EE_command();//updates working memory from EEPROM
 	for  (int i = 0; i < 64; i++)
 	{
 		Serial.print(command[i], HEX);
@@ -1611,13 +1577,13 @@ void SCmd_rtc()
 }
 
 
-void LCD_displn(String prints,int line)//displayson a given line, does not emulate CR LF
+void LCD_displn(String prints,int line)//displays on a given line, does not emulate CR LF
 {
 	char printable[20];//max 16? 17?
 	prints.toCharArray(printable,sizeof(printable));
 	lcd.setCursor(line,0); // position cursor
 	//delay(10);
-	lcd.write(printable);  // txt
+	lcd.write(printable);  // text
 	//delay(10);
 }
 
@@ -1626,7 +1592,7 @@ void LCD_disp(String prints)
 {
 	char printable[20];
 	prints.toCharArray(printable,sizeof(printable));
-	lcd.write(printable);  // txt
+	lcd.write(printable);  // text
 	//delay(10);
 }
 
@@ -1679,7 +1645,7 @@ void SCmd_display()
 
 
 // sets contrast
-//format: CONTRAST;<analog value, 0-1024>
+//format: CONTRAST;<analog value, 0-255>
 void SCmd_contrast()    
 {
 	char *arg; 
