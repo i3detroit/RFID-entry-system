@@ -1,5 +1,3 @@
-
-
 /*
  * Open Source RFID Access Controller
  * Mega version for v3.0 HARDWARE
